@@ -1,11 +1,9 @@
 using QuotaTray.Infra;
 using QuotaTray.Model;
-using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
 
 namespace QuotaTray.Tray;
 
-internal sealed class TooltipForm : Form
+internal sealed class DetailForm : Form
 {
     private static readonly Color ColorGreen = Color.FromArgb(46, 160, 67);
     private static readonly Color ColorYellow = Color.FromArgb(220, 130, 30);
@@ -13,60 +11,79 @@ internal sealed class TooltipForm : Form
     private static readonly Color TextTitle = Color.FromArgb(40, 40, 40);
     private static readonly Color TextLabel = Color.FromArgb(110, 110, 110);
     private static readonly Color TextReset = Color.FromArgb(150, 150, 150);
+    private static readonly Color TextDim = Color.FromArgb(170, 170, 170);
 
     private static readonly Font TitleFont = new("Microsoft YaHei UI", 11f, FontStyle.Bold);
     private static readonly Font DataFont = new("Microsoft YaHei UI", 10f);
     private static readonly string[] GoNames = { "5h 滚动", "每周", "每月" };
 
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    private static readonly IntPtr HWND_TOPMOST = new(-1);
-    private const uint SWP_NOMOVE = 0x0002;
-    private const uint SWP_NOSIZE = 0x0001;
-    private const uint SWP_NOACTIVATE = 0x0010;
-
-    private readonly TableLayoutPanel _table;
     private readonly Label _chatLabel = MakeData(TextLabel);
     private readonly Label _chatValue = MakeData(TextLabel);
     private readonly Label _chatReset = MakeData(TextReset);
     private readonly Label[,] _goLabels = new Label[3, 3];
 
+    private readonly Label _updatedLabel = new()
+    {
+        AutoSize = true,
+        ForeColor = TextDim,
+        Font = new Font("Microsoft YaHei UI", 9f),
+    };
+    private readonly Button _refreshButton = new()
+    {
+        Text = "立即刷新",
+        Width = 100,
+        Height = 32,
+        Font = new Font("Microsoft YaHei UI", 9.5f),
+    };
+    private readonly Button _closeButton = new()
+    {
+        Text = "关闭",
+        Width = 80,
+        Height = 32,
+        Font = new Font("Microsoft YaHei UI", 9.5f),
+    };
+
     private readonly System.Windows.Forms.Timer _countdownTimer;
     private UsageSnapshot _snapshot = new();
     private Settings _settings = new();
 
-    public TooltipForm()
-    {
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        TopMost = true;
-        StartPosition = FormStartPosition.Manual;
-        BackColor = Color.White;
+    public Func<Task>? OnRefresh { get; set; }
 
-        _table = new TableLayoutPanel
+    public DetailForm()
+    {
+        Text = "用量详情 - QuotaTray";
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = false;
+        StartPosition = FormStartPosition.CenterScreen;
+        ClientSize = new Size(460, 360);
+        BackColor = Color.White;
+        Font = DataFont;
+
+        var table = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Location = new Point(20, 18),
+            Size = new Size(420, 280),
             ColumnCount = 3,
             RowCount = 9,
             BackColor = Color.White,
         };
-        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        for (int i = 0; i < 9; i++) _table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        _table.RowStyles[2] = new RowStyle(SizeType.Absolute, 8);
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        for (int i = 0; i < 9; i++) table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        table.RowStyles[2] = new RowStyle(SizeType.Absolute, 8);
 
         var chatTitle = MakeTitle("ChatGPT Plus");
-        _table.Controls.Add(chatTitle, 0, 0);
-        _table.SetColumnSpan(chatTitle, 3);
+        table.Controls.Add(chatTitle, 0, 0);
+        table.SetColumnSpan(chatTitle, 3);
 
-        _table.Controls.Add(_chatLabel, 0, 1);
-        _table.Controls.Add(_chatValue, 1, 1);
-        _table.Controls.Add(_chatReset, 2, 1);
+        table.Controls.Add(_chatLabel, 0, 1);
+        table.Controls.Add(_chatValue, 1, 1);
+        table.Controls.Add(_chatReset, 2, 1);
 
         var goTitle = MakeTitle("opencode Go");
-        _table.Controls.Add(goTitle, 0, 3);
-        _table.SetColumnSpan(goTitle, 3);
+        table.Controls.Add(goTitle, 0, 3);
+        table.SetColumnSpan(goTitle, 3);
 
         string[] goNames = { "5h 滚动", "每周", "每月" };
         for (int i = 0; i < 3; i++)
@@ -75,24 +92,28 @@ internal sealed class TooltipForm : Form
             _goLabels[i, 0].Text = GoNames[i];
             _goLabels[i, 1] = MakeData(TextLabel);
             _goLabels[i, 2] = MakeData(TextReset);
-            _table.Controls.Add(_goLabels[i, 0], 0, 4 + i);
-            _table.Controls.Add(_goLabels[i, 1], 1, 4 + i);
-            _table.Controls.Add(_goLabels[i, 2], 2, 4 + i);
+            table.Controls.Add(_goLabels[i, 0], 0, 4 + i);
+            table.Controls.Add(_goLabels[i, 1], 1, 4 + i);
+            table.Controls.Add(_goLabels[i, 2], 2, 4 + i);
         }
 
-        var content = new Panel
+        _refreshButton.Location = new Point(240, 310);
+        _refreshButton.Click += async (_, _) =>
         {
-            Dock = DockStyle.Fill,
-            BackColor = Color.White,
-            Padding = new Padding(16, 14, 16, 14),
+            _refreshButton.Enabled = false;
+            try { if (OnRefresh is not null) await OnRefresh(); }
+            finally { _refreshButton.Enabled = true; }
         };
-        content.Controls.Add(_table);
-        Controls.Add(content);
+
+        _closeButton.Location = new Point(355, 310);
+        _closeButton.Click += (_, _) => Close();
+
+        _updatedLabel.Location = new Point(20, 318);
+
+        Controls.AddRange(new Control[] { table, _refreshButton, _closeButton, _updatedLabel });
 
         _countdownTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _countdownTimer.Tick += (_, _) => UpdateLabels();
-
-        UpdateLabels(); // 初始计算大小，避免 ShowAt 时尺寸为 0
     }
 
     private static Label MakeTitle(string text) => new()
@@ -112,37 +133,11 @@ internal sealed class TooltipForm : Form
         Margin = new Padding(0, 0, 18, 2),
     };
 
-    private void FitToContent()
-    {
-        // 手动适配大小：table 内容 + content Panel 的 Padding
-        var pref = _table.PreferredSize;
-        ClientSize = new Size(pref.Width + 32, pref.Height + 28);
-        SetRoundedRegion();
-    }
-
-    private void SetRoundedRegion()
-    {
-        if (Width <= 0 || Height <= 0) return;
-        const int r = 10;
-        var path = new GraphicsPath();
-        path.AddArc(0, 0, r, r, 180, 90);
-        path.AddArc(Width - r, 0, r, r, 270, 90);
-        path.AddArc(Width - r, Height - r, r, r, 0, 90);
-        path.AddArc(0, Height - r, r, r, 90, 90);
-        path.CloseFigure();
-        Region = new Region(path);
-    }
-
-    protected override void OnResize(EventArgs e)
-    {
-        base.OnResize(e);
-        SetRoundedRegion();
-    }
-
     public void UpdateData(UsageSnapshot snapshot, Settings settings)
     {
         _snapshot = snapshot;
         _settings = settings;
+        _updatedLabel.Text = "最后刷新: " + snapshot.RefreshedAt.ToString("HH:mm:ss");
         UpdateLabels();
     }
 
@@ -185,8 +180,6 @@ internal sealed class TooltipForm : Form
                 _goLabels[i, 2].Text = "";
             }
         }
-
-        FitToContent();
     }
 
     private void SetGoRow(int row, double usagePercent, long? resetSec)
@@ -215,34 +208,11 @@ internal sealed class TooltipForm : Form
         return $"{t.Seconds} 秒";
     }
 
-    public void ShowAt(Point screenPosition)
+    protected override void OnVisibleChanged(EventArgs e)
     {
-        var working = Screen.FromPoint(screenPosition).WorkingArea;
-        var x = Math.Min(screenPosition.X + 12, working.Right - Width);
-        var y = Math.Min(screenPosition.Y + 14, working.Bottom - Height);
-        Location = new Point(x, y);
-
-        Show();
-        SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        _countdownTimer.Start();
-    }
-
-    public new void Hide()
-    {
-        _countdownTimer.Stop();
-        base.Hide();
-    }
-
-    protected override bool ShowWithoutActivation => true;
-
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            var cp = base.CreateParams;
-            cp.ExStyle |= 0x00000020; // WS_EX_TRANSPARENT
-            return cp;
-        }
+        base.OnVisibleChanged(e);
+        if (Visible) _countdownTimer.Start();
+        else _countdownTimer.Stop();
     }
 
     protected override void Dispose(bool disposing)

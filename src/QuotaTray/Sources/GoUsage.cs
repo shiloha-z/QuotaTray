@@ -66,7 +66,7 @@ internal sealed class GoUsage
         catch (Exception ex)
         {
             Logger.Log("Go fetch error: " + ex.Message);
-            return (SourceStatus.Error, ex.Message, null, null, null, null, null, null);
+            return (SourceStatus.Error, "查询失败（请查看日志）", null, null, null, null, null, null);
         }
     }
 

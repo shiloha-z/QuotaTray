@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Product>QuotaTray</Product>
     <Description>Windows 托盘小工具：监控 ChatGPT Plus Codex 配额与 opencode Go 用量</Description>
   </PropertyGroup>

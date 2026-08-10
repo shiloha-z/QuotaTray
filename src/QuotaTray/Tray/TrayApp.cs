@@ -7,41 +7,48 @@ namespace QuotaTray.Tray;
 
 internal sealed class TrayApp : ApplicationContext
 {
-    private const string AutostartRunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string AutostartName = "QuotaTray";
-
     private readonly NotifyIcon _icon = new();
     private readonly TooltipForm _tip = new();
     private readonly ContextMenuStrip _menu = new();
     private readonly System.Windows.Forms.Timer _refreshTimer;
     private readonly System.Windows.Forms.Timer _hoverTimer;
     private readonly System.Windows.Forms.Timer _hoverWatchTimer;
-    private readonly Control _syncControl = new();
     private readonly SynchronizationContext? _postCtx;
     private readonly ChatGptUsage _chat = new();
     private readonly GoUsage _go = new();
-    private readonly Settings _settings = Settings.Load();
+    private Settings _settings = Settings.Load();
+    private ToolStripMenuItem? _autostartItem;
 
     private UsageSnapshot _snapshot = new();
     private bool _refreshing;
     private Point _lastIconPos = Point.Empty;
+    private bool _notified50;
+    private bool _notified30;
+    private bool _notified10;
+    private DetailForm? _detailForm;
 
     public TrayApp()
     {
         _postCtx = SynchronizationContext.Current;
-        EnsureAutostart();
+        Autostart.CleanupLegacy();
+        if (!Autostart.IsEnabled())
+        {
+            Autostart.Set(true);
+        }
+
         BuildMenu();
 
-        _icon.Icon = IconFactory.Get(IconFactory.Gray);
+        _icon.Icon = IconFactory.Get(IconFactory.Gray, null);
         _icon.Visible = true;
-        _icon.Text = "";
+        _icon.Text = "QuotaTray";
 
         _hoverTimer = new System.Windows.Forms.Timer { Interval = 600 };
         _hoverTimer.Tick += (_, _) =>
         {
             _hoverTimer.Stop();
-            _tip.ShowAt(Cursor.Position, _snapshot.TooltipText);
-            _hoverWatchTimer.Start();
+            _tip.UpdateData(_snapshot, _settings);
+            _tip.ShowAt(Cursor.Position);
+            _hoverWatchTimer?.Start();
         };
 
         _hoverWatchTimer = new System.Windows.Forms.Timer { Interval = 300 };
@@ -72,6 +79,7 @@ internal sealed class TrayApp : ApplicationContext
             {
                 _hoverTimer.Stop();
                 _tip.Hide();
+                ShowDetail();
             }
         };
 
@@ -84,6 +92,13 @@ internal sealed class TrayApp : ApplicationContext
 
         _ = RefreshNowAsync();
 
+        // 首登异步化：延迟到 UI 消息循环启动后执行，避免构造函数中 ShowDialog 阻塞
+        Application.Idle += FirstLoginOnIdle;
+    }
+
+    private void FirstLoginOnIdle(object? sender, EventArgs e)
+    {
+        Application.Idle -= FirstLoginOnIdle;
         RunFirstLoginIfNeeded();
     }
 
@@ -92,14 +107,27 @@ internal sealed class TrayApp : ApplicationContext
         var refresh = new ToolStripMenuItem("立即刷新");
         refresh.Click += async (_, _) => await RefreshNowAsync();
 
+        var detail = new ToolStripMenuItem("查看详情...");
+        detail.Click += (_, _) => ShowDetail();
+
         var loginChat = new ToolStripMenuItem("重新登录 ChatGPT...");
         loginChat.Click += (_, _) => ShowLogin(LoginKind.ChatGpt);
 
         var loginZen = new ToolStripMenuItem("重新登录 Go...");
         loginZen.Click += (_, _) => ShowLogin(LoginKind.Zen);
 
-        var autostart = new ToolStripMenuItem("开机自启") { Checked = IsAutostartEnabled() };
-        autostart.Click += (_, _) => SetAutostart(!autostart.Checked);
+        var settings = new ToolStripMenuItem("设置...");
+        settings.Click += (_, _) => ShowSettings();
+
+        _autostartItem = new ToolStripMenuItem("开机自启") { Checked = Autostart.IsEnabled() };
+        _autostartItem.Click += (_, _) =>
+        {
+            Autostart.Set(!_autostartItem.Checked);
+            _autostartItem.Checked = Autostart.IsEnabled();
+        };
+
+        var openLog = new ToolStripMenuItem("查看日志");
+        openLog.Click += (_, _) => OpenLog();
 
         var openData = new ToolStripMenuItem("打开数据目录");
         openData.Click += (_, _) => System.Diagnostics.Process.Start("explorer.exe", AppPaths.DataDir);
@@ -109,13 +137,70 @@ internal sealed class TrayApp : ApplicationContext
 
         _menu.Items.AddRange(new ToolStripItem[]
         {
-            refresh, new ToolStripSeparator(),
+            refresh, detail, new ToolStripSeparator(),
             loginChat, loginZen, new ToolStripSeparator(),
-            autostart, openData, new ToolStripSeparator(),
+            settings, _autostartItem, openLog, openData, new ToolStripSeparator(),
             exit,
         });
 
         _icon.ContextMenuStrip = _menu;
+    }
+
+    private void ShowDetail()
+    {
+        if (_detailForm is null || _detailForm.IsDisposed)
+        {
+            _detailForm = new DetailForm { OnRefresh = RefreshNowAsync };
+            _detailForm.FormClosed += (_, _) => _detailForm = null;
+        }
+
+        _detailForm.UpdateData(_snapshot, _settings);
+        _detailForm.Show();
+        _detailForm.BringToFront();
+    }
+
+    private void ShowSettings()
+    {
+        using var form = new SettingsForm(_settings);
+        if (form.ShowDialog() == DialogResult.OK)
+        {
+            // 设置已保存到 _settings 实例 + 文件，重新加载并应用
+            _settings = Settings.Load();
+            ApplySettings();
+        }
+    }
+
+    private void ApplySettings()
+    {
+        _refreshTimer.Stop();
+        _refreshTimer.Interval = Math.Max(1, _settings.RefreshIntervalMinutes) * 60 * 1000;
+        _refreshTimer.Start();
+
+        if (_autostartItem is not null)
+        {
+            _autostartItem.Checked = Autostart.IsEnabled();
+        }
+
+        // 阈值变更后立即刷新 UI 颜色
+        UpdateUi();
+    }
+
+    private static void OpenLog()
+    {
+        try
+        {
+            var file = Path.Combine(AppPaths.LogDir, DateTime.Now.ToString("yyyy-MM-dd") + ".log");
+            if (!File.Exists(file))
+            {
+                File.WriteAllText(file, "");
+            }
+
+            System.Diagnostics.Process.Start("explorer.exe", file);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("open log error: " + ex.Message);
+        }
     }
 
     private async void ShowLogin(LoginKind kind)
@@ -145,8 +230,8 @@ internal sealed class TrayApp : ApplicationContext
 
         if (!hasChatGpt || !hasZen)
         {
-            _icon.ShowBalloonTip(8000, "Agent Usage Checker",
-                "首次使用，请完成登录：\nChatGPT（用量查询）" + (hasZen ? "" : "\nZen / opencode Go（用量查询）"),
+            _icon.ShowBalloonTip(8000, "QuotaTray",
+                "首次使用，请完成登录：\nChatGPT（用量查询）" + (hasZen ? "" : "\nopencode Go（用量查询）"),
                 ToolTipIcon.Info);
         }
 
@@ -161,7 +246,7 @@ internal sealed class TrayApp : ApplicationContext
         }
     }
 
-    private async Task RefreshNowAsync()
+    internal async Task RefreshNowAsync()
     {
         if (_refreshing)
         {
@@ -171,10 +256,10 @@ internal sealed class TrayApp : ApplicationContext
         _refreshing = true;
         try
         {
-            var settings = Settings.Load();
+            var settings = _settings;
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 
-            var snapshot = new UsageSnapshot();
+            var snapshot = new UsageSnapshot { RefreshedAt = DateTime.Now };
 
             var chatTask = _chat.FetchAsync(settings.ChatGptEndpoint ?? "", settings.ChatGptJsonPath,
                 settings.ChatGptMaxValue, settings.ChatGptValueIsRemaining, cts.Token);
@@ -206,16 +291,18 @@ internal sealed class TrayApp : ApplicationContext
     private void UpdateUi()
     {
         var s = _snapshot;
+        double? percent = s.HasError ? null : s.OverallPercent;
+
         Color color;
-        if (s.HasError || s.OverallPercent is null)
+        if (s.HasError || percent is null)
         {
             color = IconFactory.Gray;
         }
-        else if (s.OverallPercent < 20)
+        else if (percent < _settings.WarningThresholdPercent)
         {
             color = IconFactory.Red;
         }
-        else if (s.OverallPercent < 50)
+        else if (percent < _settings.GreenThresholdPercent)
         {
             color = IconFactory.Yellow;
         }
@@ -224,58 +311,57 @@ internal sealed class TrayApp : ApplicationContext
             color = IconFactory.Green;
         }
 
-        _icon.Icon = IconFactory.Get(color);
-        _icon.Text = "";
+        _icon.Icon = IconFactory.Get(color, percent);
+
+        // 更新 tooltip 数据
+        _tip.UpdateData(s, _settings);
+        if (_detailForm is not null && !_detailForm.IsDisposed)
+        {
+            _detailForm.UpdateData(s, _settings);
+        }
+
+        // 低余量通知：仅在降到 50% / 30% / 10% 时各通知一次
+        CheckLowQuotaNotification(percent);
     }
 
-    private static void EnsureAutostart()
+    private void CheckLowQuotaNotification(double? percent)
     {
-        try
+        if (!percent.HasValue)
         {
-            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(AutostartRunKey);
-            key.DeleteValue("AgentUsageChecker", false);
-        }
-        catch
-        {
+            return;
         }
 
-        if (!IsAutostartEnabled())
+        var current = percent.Value;
+
+        // 余量回升超过档位 +5 缓冲时重置标记，避免在阈值附近抖动反复通知，并允许下次再触发
+        if (current > 55) _notified50 = false;
+        if (current > 35) _notified30 = false;
+        if (current > 15) _notified10 = false;
+
+        // 降到各档位时各通知一次（独立判断，一次跨多档可连续触发）
+        if (current <= 50 && !_notified50)
         {
-            SetAutostart(true);
+            _notified50 = true;
+            NotifyLowQuota(current);
+        }
+        if (current <= 30 && !_notified30)
+        {
+            _notified30 = true;
+            NotifyLowQuota(current);
+        }
+        if (current <= 10 && !_notified10)
+        {
+            _notified10 = true;
+            NotifyLowQuota(current);
         }
     }
 
-    private static bool IsAutostartEnabled()
+    private void NotifyLowQuota(double current)
     {
-        try
-        {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(AutostartRunKey);
-            return key?.GetValue(AutostartName) != null;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static void SetAutostart(bool enabled)
-    {
-        try
-        {
-            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(AutostartRunKey);
-            if (enabled)
-            {
-                key.SetValue(AutostartName, "\"" + Application.ExecutablePath + "\"");
-            }
-            else
-            {
-                key.DeleteValue(AutostartName, false);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Log("autostart error: " + ex.Message);
-        }
+        _icon.ShowBalloonTip(8000, "QuotaTray 余量告警",
+            $"当前最低余量仅剩 {current:0}%，请注意用量。",
+            ToolTipIcon.Warning);
+        Logger.Log($"NOTIFY low quota: {current:0.##}%");
     }
 
     private void Exit()
@@ -285,6 +371,8 @@ internal sealed class TrayApp : ApplicationContext
         _refreshTimer.Stop();
         _tip.Hide();
         _tip.Dispose();
+        _detailForm?.Close();
+        _detailForm?.Dispose();
         _icon.Visible = false;
         _icon.Dispose();
         _menu.Dispose();

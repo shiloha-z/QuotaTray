@@ -16,6 +16,7 @@ internal sealed class HiddenFetchWebView : IDisposable
     private CoreWebView2Environment? _env;
     private TaskCompletionSource<FetchResult>? _pending;
     private bool _ready;
+    private bool _navFailed;
     private SynchronizationContext? _uiContext;
 
     public HiddenFetchWebView(string profileName, string entryUrl)
@@ -38,6 +39,19 @@ internal sealed class HiddenFetchWebView : IDisposable
     private async Task<FetchResult> FetchAsyncCore(string url, string headersJs, CancellationToken ct)
     {
         await EnsureReadyAsync();
+        if (_navFailed)
+        {
+            return new FetchResult(0, "webview 导航失败，请重新登录");
+        }
+
+        // 修复竞态：若上一次请求未完成，先完成它，避免旧 tcs 永不完成
+        var previous = _pending;
+        if (previous is not null)
+        {
+            previous.TrySetResult(new FetchResult(0, "superseded"));
+            _pending = null;
+        }
+
         var tcs = new TaskCompletionSource<FetchResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending = tcs;
 
@@ -94,6 +108,35 @@ internal sealed class HiddenFetchWebView : IDisposable
             return;
         }
 
+        _navFailed = false;
+        Exception? lastError = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                await EnsureReadyCoreAsync();
+                _ready = true;
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                Logger.Log($"HiddenFetch nav '{_profileName}' attempt {attempt + 1} failed: {ex.Message}");
+                // 第一次失败时清理已创建的 web/form，下次循环重建
+                if (attempt == 0)
+                {
+                    CleanupControls();
+                    await Task.Delay(2000);
+                }
+            }
+        }
+
+        _navFailed = true;
+        Logger.Log($"HiddenFetch nav '{_profileName}' giving up after retries: {lastError?.Message}");
+    }
+
+    private async Task EnsureReadyCoreAsync()
+    {
         _form = new Form
         {
             ShowInTaskbar = false,
@@ -130,7 +173,32 @@ internal sealed class HiddenFetchWebView : IDisposable
         _web.CoreWebView2.Navigate(_entryUrl);
         await navigation.Task.WaitAsync(TimeSpan.FromSeconds(40));
         Logger.Log($"HiddenFetch nav '{_profileName}' ready");
-        _ready = true;
+    }
+
+    private void CleanupControls()
+    {
+        if (_web is not null)
+        {
+            try
+            {
+                _web.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
+                _web.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            _form?.Dispose();
+        }
+        catch
+        {
+        }
+
+        _web = null;
+        _form = null;
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -157,15 +225,10 @@ internal sealed class HiddenFetchWebView : IDisposable
 
     public void Dispose()
     {
-        if (_web is not null)
-        {
-            _web.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
-            _web.Dispose();
-        }
-
-        _form?.Dispose();
-        _web = null;
-        _form = null;
+        CleanupControls();
+        _env = null;
         _ready = false;
+        _navFailed = false;
+        _pending = null;
     }
 }

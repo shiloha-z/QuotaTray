@@ -24,6 +24,9 @@ internal sealed class UsageSnapshot
     public long? GoResetWeekSec { get; set; }
     public long? GoResetMonthSec { get; set; }
 
+    /// <summary>本次快照刷新时刻（本地时间），用于实时倒计时计算。</summary>
+    public DateTime RefreshedAt { get; set; } = DateTime.Now;
+
     public bool HasError =>
         ChatGptStatus is SourceStatus.Error or SourceStatus.AuthFailed
         || GoStatus is SourceStatus.Error or SourceStatus.AuthFailed;
@@ -32,7 +35,15 @@ internal sealed class UsageSnapshot
     {
         get
         {
-            var values = new[] { ChatGptPercent, Go5hPercent, GoWeekPercent, GoMonthPercent }
+            // 统一为“剩余百分比”后取最小值（Go 的字段是已用%，需 100-转剩余）
+            double?[] raw =
+            {
+                ChatGptPercent,
+                Go5hPercent.HasValue ? 100 - Go5hPercent.Value : null,
+                GoWeekPercent.HasValue ? 100 - GoWeekPercent.Value : null,
+                GoMonthPercent.HasValue ? 100 - GoMonthPercent.Value : null,
+            };
+            var values = raw
                 .Where(v => v.HasValue)
                 .Select(v => v!.Value)
                 .ToArray();

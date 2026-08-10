@@ -2,7 +2,7 @@
 
 Windows 托盘小工具：实时监控 AI 订阅用量 —— **ChatGPT Plus Codex 周配额** 与 **opencode Go 套餐用量**，鼠标悬停托盘图标即看。
 
-![项目截图](./Screenshot%202026-08-10%20145926.png)
+![项目截图](./image.png)
 
 ## 功能
 

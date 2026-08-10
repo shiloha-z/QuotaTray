@@ -24,11 +24,18 @@ internal sealed class Settings
 
     public string? GoWorkspaceId { get; set; }
 
+    // 以下 GoLimit* 字段未使用：Go 用量直接从 SSR usagePercent 获取百分比，保留仅为旧 settings.json 反序列化兼容
     public double GoLimit5h { get; set; } = 12;
 
     public double GoLimitWeek { get; set; } = 30;
 
     public double GoLimitMonth { get; set; } = 60;
+
+    /// <summary>余量低于此百分比触发告警通知（默认 20）</summary>
+    public int WarningThresholdPercent { get; set; } = 20;
+
+    /// <summary>余量高于此百分比显示绿色（默认 50）；介于告警值与此值之间显示黄色</summary>
+    public int GreenThresholdPercent { get; set; } = 50;
 
     public static Settings Load()
     {

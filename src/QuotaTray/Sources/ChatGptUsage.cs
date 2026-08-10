@@ -62,9 +62,10 @@ internal sealed class ChatGptUsage
 
             if (maxValue.HasValue && maxValue.Value > 0)
             {
-                percent = Math.Min(100, value / maxValue.Value * 100);
-                var remaining = valueIsRemaining ? value : maxValue.Value - value;
-                detail = $"周限额剩余 {Math.Max(0, remaining) / maxValue.Value * 100:0}%";
+                // percent 统一表示“剩余百分比”，与 detail 一致
+                var remaining = Math.Max(0, valueIsRemaining ? value : maxValue.Value - value);
+                percent = Math.Min(100, remaining / maxValue.Value * 100);
+                detail = $"周限额剩余 {percent:0}%";
             }
 
             long? resetSec = null;
@@ -88,7 +89,7 @@ internal sealed class ChatGptUsage
         catch (Exception ex)
         {
             Logger.Log("ChatGPT fetch error: " + ex.Message);
-            return (SourceStatus.Error, ex.Message, null, null);
+            return (SourceStatus.Error, "查询失败（请查看日志）", null, null);
         }
     }
 
