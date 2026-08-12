@@ -6,10 +6,6 @@ namespace QuotaTray.Sources;
 
 internal sealed class GoUsage
 {
-    private readonly HiddenFetchWebView _web = new("zen", "https://opencode.ai/");
-
-    public void ResetSession() => _web.Dispose();
-
     public async Task<(SourceStatus Status, string Detail, double? Pct5h, double? PctWeek, double? PctMonth,
         long? Reset5hSec, long? ResetWeekSec, long? ResetMonthSec)> FetchAsync(
         string workspaceId, CancellationToken ct)
@@ -22,7 +18,9 @@ internal sealed class GoUsage
         var endpoint = $"https://opencode.ai/workspace/{workspaceId}/go";
         try
         {
-            var result = await _web.FetchAsync(endpoint, "{}", ct);
+            // ADR-001 按需创建：fetch 完成即销毁，登录态由 UDP 持久化承载
+            using var web = new HiddenFetchWebView("zen", "https://opencode.ai/");
+            var result = await web.FetchAsync(endpoint, "{}", ct);
 
             if (result.Status is 401 or 403)
             {

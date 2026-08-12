@@ -213,15 +213,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private async void ShowLogin(LoginKind kind)
     {
-        if (kind == LoginKind.ChatGpt)
-        {
-            _chat.ResetSession();
-        }
-        else
-        {
-            _go.ResetSession();
-        }
-
+        // 按需创建后（ADR-001）无需重置会话：fetch 实例本就用后即焚，登录态由 UDP 承载
         using (var window = new LoginWindow(kind))
         {
             window.ShowDialog();

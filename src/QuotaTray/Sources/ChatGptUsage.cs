@@ -6,10 +6,6 @@ namespace QuotaTray.Sources;
 
 internal sealed class ChatGptUsage
 {
-    private readonly HiddenFetchWebView _web = new("chatgpt", "https://chatgpt.com/");
-
-    public void ResetSession() => _web.Dispose();
-
     public async Task<(SourceStatus Status, string Detail, double? Percent, long? ResetSec)> FetchAsync(
         string endpoint, string jsonPath, double? maxValue, bool valueIsRemaining, CancellationToken ct)
     {
@@ -20,7 +16,9 @@ internal sealed class ChatGptUsage
 
         try
         {
-            var result = await _web.FetchAsync(endpoint, "{}", ct);
+            // ADR-001 按需创建：fetch 完成即销毁，登录态由 UDP 持久化承载（~1GB 常驻进程 → 0）
+            using var web = new HiddenFetchWebView("chatgpt", "https://chatgpt.com/");
+            var result = await web.FetchAsync(endpoint, "{}", ct);
 
             if (result.Status is 401 or 403)
             {
