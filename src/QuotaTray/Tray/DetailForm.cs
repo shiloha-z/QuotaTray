@@ -5,27 +5,19 @@ namespace QuotaTray.Tray;
 
 internal sealed class DetailForm : Form
 {
-    private static readonly Color ColorGreen = Color.FromArgb(46, 160, 67);
-    private static readonly Color ColorYellow = Color.FromArgb(220, 130, 30);
-    private static readonly Color ColorRed = Color.FromArgb(210, 50, 45);
-    private static readonly Color TextTitle = Color.FromArgb(40, 40, 40);
-    private static readonly Color TextLabel = Color.FromArgb(110, 110, 110);
-    private static readonly Color TextReset = Color.FromArgb(150, 150, 150);
-    private static readonly Color TextDim = Color.FromArgb(170, 170, 170);
-
     private static readonly Font TitleFont = new("Microsoft YaHei UI", 11f, FontStyle.Bold);
     private static readonly Font DataFont = new("Microsoft YaHei UI", 10f);
     private static readonly string[] GoNames = { "5h 滚动", "每周", "每月" };
 
-    private readonly Label _chatLabel = MakeData(TextLabel);
-    private readonly Label _chatValue = MakeData(TextLabel);
-    private readonly Label _chatReset = MakeData(TextReset);
+    private readonly Label _chatLabel = MakeData(Formatting.TextLabel);
+    private readonly Label _chatValue = MakeData(Formatting.TextLabel);
+    private readonly Label _chatReset = MakeData(Formatting.TextReset);
     private readonly Label[,] _goLabels = new Label[3, 3];
 
     private readonly Label _updatedLabel = new()
     {
         AutoSize = true,
-        ForeColor = TextDim,
+        ForeColor = Formatting.TextDim,
         Font = new Font("Microsoft YaHei UI", 9f),
     };
     private readonly Button _refreshButton = new()
@@ -93,10 +85,10 @@ internal sealed class DetailForm : Form
         string[] goNames = { "5h 滚动", "每周", "每月" };
         for (int i = 0; i < 3; i++)
         {
-            _goLabels[i, 0] = MakeData(TextLabel);
+            _goLabels[i, 0] = MakeData(Formatting.TextLabel);
             _goLabels[i, 0].Text = GoNames[i];
-            _goLabels[i, 1] = MakeData(TextLabel);
-            _goLabels[i, 2] = MakeData(TextReset);
+            _goLabels[i, 1] = MakeData(Formatting.TextLabel);
+            _goLabels[i, 2] = MakeData(Formatting.TextReset);
             _table.Controls.Add(_goLabels[i, 0], 0, 4 + i);
             _table.Controls.Add(_goLabels[i, 1], 1, 4 + i);
             _table.Controls.Add(_goLabels[i, 2], 2, 4 + i);
@@ -145,7 +137,7 @@ internal sealed class DetailForm : Form
     {
         Text = text,
         Font = TitleFont,
-        ForeColor = TextTitle,
+        ForeColor = Formatting.TextTitle,
         AutoSize = true,
         Margin = new Padding(0, 0, 0, 6),
     };
@@ -175,14 +167,14 @@ internal sealed class DetailForm : Form
             var remaining = _snapshot.ChatGptResetSec.Value - (long)elapsed.TotalSeconds;
             _chatLabel.Text = "周限额";
             _chatValue.Text = $"剩余 {_snapshot.ChatGptPercent.Value:0}%";
-            _chatValue.ForeColor = GetColorForPercent(_snapshot.ChatGptPercent);
-            _chatReset.Text = $"重置于 {FormatReset(remaining)}";
+            _chatValue.ForeColor = Formatting.PercentColor(_snapshot.ChatGptPercent, _settings);
+            _chatReset.Text = $"重置于 {Formatting.FormatReset(remaining)}";
         }
         else
         {
             _chatLabel.Text = "";
             _chatValue.Text = _snapshot.ChatGptDetail;
-            _chatValue.ForeColor = TextReset;
+            _chatValue.ForeColor = Formatting.TextReset;
             _chatReset.Text = "";
         }
 
@@ -213,26 +205,8 @@ internal sealed class DetailForm : Form
     {
         var remaining = 100 - usagePercent;
         _goLabels[row, 1].Text = $"剩余 {remaining:0}%";
-        _goLabels[row, 1].ForeColor = GetColorForPercent(remaining);
-        _goLabels[row, 2].Text = $"重置于 {FormatReset(resetSec)}";
-    }
-
-    private Color GetColorForPercent(double? percent)
-    {
-        if (!percent.HasValue) return TextReset;
-        if (percent.Value < _settings.WarningThresholdPercent) return ColorRed;
-        if (percent.Value < _settings.GreenThresholdPercent) return ColorYellow;
-        return ColorGreen;
-    }
-
-    private static string FormatReset(long? seconds)
-    {
-        if (!seconds.HasValue || seconds.Value <= 0) return "未知";
-        var t = TimeSpan.FromSeconds(seconds.Value);
-        if (t.TotalDays >= 1) return $"{t.Days} 天 {t.Hours} 小时";
-        if (t.TotalHours >= 1) return $"{t.Hours} 小时 {t.Minutes} 分";
-        if (t.TotalMinutes >= 1) return $"{t.Minutes} 分 {t.Seconds} 秒";
-        return $"{t.Seconds} 秒";
+        _goLabels[row, 1].ForeColor = Formatting.PercentColor(remaining, _settings);
+        _goLabels[row, 2].Text = $"重置于 {Formatting.FormatReset(resetSec)}";
     }
 
     protected override void OnVisibleChanged(EventArgs e)

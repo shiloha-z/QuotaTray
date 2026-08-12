@@ -1,14 +1,15 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using QuotaTray.Model;
 
 namespace QuotaTray.Tray;
 
 internal static class IconFactory
 {
-    // 保留颜色常量供 TrayApp 逻辑判断使用（图标本身不再变色）
-    public static readonly Color Green = Color.FromArgb(46, 160, 67);
-    public static readonly Color Yellow = Color.FromArgb(220, 130, 30);
-    public static readonly Color Red = Color.FromArgb(210, 50, 45);
+    // 调色板统一引用 Formatting（ADR-008）；Gray 为图标置灰态专用。
+    public static readonly Color Green = Formatting.ColorGreen;
+    public static readonly Color Yellow = Formatting.ColorYellow;
+    public static readonly Color Red = Formatting.ColorRed;
     public static readonly Color Gray = Color.FromArgb(150, 150, 150);
 
     private static Icon? _single;
