@@ -210,12 +210,27 @@ internal sealed class TooltipForm : Form
 
     protected override bool ShowWithoutActivation => true;
 
+    /// <summary>输入法切换请求：吞掉，防止悬浮窗改变系统输入法语言（托盘工具经典问题）。</summary>
+    private const int WM_INPUTLANGCHANGEREQUEST = 0x0050;
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_INPUTLANGCHANGEREQUEST)
+        {
+            Logger.Log("Tooltip: swallowed WM_INPUTLANGCHANGEREQUEST");
+            return;
+        }
+
+        base.WndProc(ref m);
+    }
+
     protected override CreateParams CreateParams
     {
         get
         {
             var cp = base.CreateParams;
             cp.ExStyle |= 0x00000020; // WS_EX_TRANSPARENT
+            cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE：窗口永不激活，从根上杜绝抢焦点
             return cp;
         }
     }
