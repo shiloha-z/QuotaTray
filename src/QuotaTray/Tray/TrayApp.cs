@@ -13,7 +13,6 @@ internal sealed class TrayApp : ApplicationContext
     private readonly System.Windows.Forms.Timer _refreshTimer;
     private readonly System.Windows.Forms.Timer _hoverTimer;
     private readonly System.Windows.Forms.Timer _hoverWatchTimer;
-    private readonly SynchronizationContext? _postCtx;
     private readonly ChatGptUsage _chat = new();
     private readonly GoUsage _go = new();
     private Settings _settings = Settings.Load();
@@ -29,7 +28,6 @@ internal sealed class TrayApp : ApplicationContext
 
     public TrayApp()
     {
-        _postCtx = SynchronizationContext.Current;
         Autostart.CleanupLegacy();
         if (!Autostart.IsEnabled())
         {
@@ -90,10 +88,18 @@ internal sealed class TrayApp : ApplicationContext
         _refreshTimer.Tick += async (_, _) => await RefreshNowAsync();
         _refreshTimer.Start();
 
-        _ = RefreshNowAsync();
-
-        // 首登异步化：延迟到 UI 消息循环启动后执行，避免构造函数中 ShowDialog 阻塞
+        // 首刷与首登都延迟到 UI 消息循环启动后执行：
+        // 构造器中 SynchronizationContext 尚未就绪（创建控件句柄后才安装），
+        // 此时启动刷新会让 HiddenFetchWebView 拿到 "no UI context" 而失败（见 ADR-006）。
+        // 首刷先于首登注册：登录弹窗 ShowDialog 期间（嵌套消息循环）刷新可正常完成。
+        Application.Idle += FirstRefreshOnIdle;
         Application.Idle += FirstLoginOnIdle;
+    }
+
+    private void FirstRefreshOnIdle(object? sender, EventArgs e)
+    {
+        Application.Idle -= FirstRefreshOnIdle;
+        _ = RefreshNowAsync();
     }
 
     private void FirstLoginOnIdle(object? sender, EventArgs e)
@@ -276,7 +282,9 @@ internal sealed class TrayApp : ApplicationContext
 
             _snapshot = snapshot;
             Logger.Log($"REFRESH ok: chat={snapshot.ChatGptStatus}/{snapshot.ChatGptDetail} go={snapshot.GoStatus}/{snapshot.GoDetail}");
-            _postCtx?.Post(_ => UpdateUi(), null);
+            // 所有调用点都在 UI 线程（定时器/菜单/详情窗/重登），await 续体由 WinForms
+            // 同步上下文自动回到 UI 线程，无需手动 marshal（见 ADR-006）
+            UpdateUi();
         }
         catch (Exception ex)
         {
