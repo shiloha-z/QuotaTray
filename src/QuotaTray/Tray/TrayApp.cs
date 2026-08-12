@@ -24,6 +24,8 @@ internal sealed class TrayApp : ApplicationContext
     private bool _notified50;
     private bool _notified30;
     private bool _notified10;
+    private bool _chatAuthFailedNotified;
+    private bool _goAuthFailedNotified;
     private DetailForm? _detailForm;
 
     public TrayApp()
@@ -299,10 +301,12 @@ internal sealed class TrayApp : ApplicationContext
     private void UpdateUi()
     {
         var s = _snapshot;
-        double? percent = s.HasError ? null : s.OverallPercent;
+        // ADR-005 分源降级：故障源的窗口已是 null，自动从聚合中剔除，
+        // 图标与告警继续由健康源计算；仅当无任何健康数据（全源失败/未配置）时整体置灰。
+        double? percent = s.OverallPercent;
 
         Color color;
-        if (s.HasError || percent is null)
+        if (percent is null)
         {
             color = IconFactory.Gray;
         }
@@ -330,6 +334,45 @@ internal sealed class TrayApp : ApplicationContext
 
         // 低余量通知：仅在降到 50% / 30% / 10% 时各通知一次
         CheckLowQuotaNotification(percent);
+        // 登录失效通知：按源、失效段内只弹一次（ADR-003）
+        CheckAuthFailedNotifications(s);
+    }
+
+    /// <summary>ADR-003：源失效弹一次通知；该源恢复（重新登录成功）后重置标记，
+    /// 允许下次失效再次通知。状态仅存运行时。</summary>
+    private void CheckAuthFailedNotifications(UsageSnapshot s)
+    {
+        if (s.ChatGptStatus == SourceStatus.AuthFailed)
+        {
+            if (!_chatAuthFailedNotified)
+            {
+                _chatAuthFailedNotified = true;
+                _icon.ShowBalloonTip(8000, "QuotaTray",
+                    "ChatGPT 登录已失效，请右键图标选择“重新登录 ChatGPT”。",
+                    ToolTipIcon.Warning);
+                Logger.Log("NOTIFY auth failed: chatgpt");
+            }
+        }
+        else
+        {
+            _chatAuthFailedNotified = false;
+        }
+
+        if (s.GoStatus == SourceStatus.AuthFailed)
+        {
+            if (!_goAuthFailedNotified)
+            {
+                _goAuthFailedNotified = true;
+                _icon.ShowBalloonTip(8000, "QuotaTray",
+                    "opencode Go 登录已失效，请右键图标选择“重新登录 Go”。",
+                    ToolTipIcon.Warning);
+                Logger.Log("NOTIFY auth failed: go");
+            }
+        }
+        else
+        {
+            _goAuthFailedNotified = false;
+        }
     }
 
     private void CheckLowQuotaNotification(double? percent)

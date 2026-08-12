@@ -27,10 +27,6 @@ internal sealed class UsageSnapshot
     /// <summary>本次快照刷新时刻（本地时间），用于实时倒计时计算。</summary>
     public DateTime RefreshedAt { get; set; } = DateTime.Now;
 
-    public bool HasError =>
-        ChatGptStatus is SourceStatus.Error or SourceStatus.AuthFailed
-        || GoStatus is SourceStatus.Error or SourceStatus.AuthFailed;
-
     public double? OverallPercent
     {
         get
