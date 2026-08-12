@@ -1,3 +1,4 @@
+using System.Text.Json;
 using QuotaTray.Infra;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -151,27 +152,41 @@ internal sealed class LoginWindow : Form
 
     private async Task SaveChatGptAsync()
     {
-        var cookies = await _web.CoreWebView2.CookieManager.GetCookiesAsync("https://chatgpt.com");
-        var parts = new List<string>();
-        foreach (var cookie in cookies)
+        // ADR-002：不再导出/保存 cookie 串（内容从未被回读，纯属死数据 + 明文隐患），
+        // 改以页面会话信号判定登录成功，凭据管理器只写 "ok" 标记。
+        var accessToken = await GetSessionAccessTokenAsync();
+        if (accessToken is null)
         {
-            if (!string.IsNullOrEmpty(cookie.Name))
-            {
-                parts.Add($"{cookie.Name}={cookie.Value}");
-            }
-        }
-
-        if (parts.Count == 0)
-        {
-            _statusLabel.Text = "没有拿到 cookie —— 请确认已经登录成功再试。";
+            _statusLabel.Text = "未检测到登录会话 —— 请确认已在窗口中登录成功，再点下方按钮。";
             return;
         }
 
-        CredentialStore.Save(CredentialTargets.ChatGptCookies, string.Join("; ", parts));
-        _statusLabel.Text = $"已保存 {parts.Count} 个 cookie，可以关闭窗口了。";
-        Logger.Log($"LOGIN chatgpt saved {parts.Count} cookies");
+        CredentialStore.Save(CredentialTargets.ChatGptCookies, "ok");
+        _statusLabel.Text = "已保存登录标记，可以关闭窗口了。";
+        Logger.Log("LOGIN chatgpt saved marker (session accessToken present)");
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private async Task<string?> GetSessionAccessTokenAsync()
+    {
+        try
+        {
+            // 返回 JS 字符串值；ExecuteScriptAsync 结果会再包一层 JSON 引号
+            var raw = await _web.CoreWebView2.ExecuteScriptAsync(
+                "fetch('/api/auth/session', { credentials: 'include' })" +
+                ".then(r => r.json()).then(j => j.accessToken || '').catch(() => '')");
+            using var doc = JsonDocument.Parse(raw);
+            var token = doc.RootElement.ValueKind == JsonValueKind.String
+                ? doc.RootElement.GetString()
+                : null;
+            return string.IsNullOrEmpty(token) ? null : token;
+        }
+        catch (Exception ex)
+        {
+            Logger.Log("chatgpt session check error: " + ex.Message);
+            return null;
+        }
     }
 
     private async Task SaveZenAsync()
@@ -196,8 +211,9 @@ internal sealed class LoginWindow : Form
             Logger.Log("zen workspace save error: " + ex.Message);
         }
 
-        CredentialStore.Save(CredentialTargets.ZenJwt, "ok:" + workspaceId);
-        Logger.Log($"LOGIN zen saved workspace={workspaceId} url={currentUrl}");
+        // ADR-002：凭据管理器只存 "ok" 标记；workspaceId 已存 settings.json（上面）
+        CredentialStore.Save(CredentialTargets.ZenJwt, "ok");
+        Logger.Log($"LOGIN zen saved marker workspace={workspaceId} url={currentUrl}");
         _statusLabel.Text = $"已保存 Zen 登录态 (workspace {workspaceId})，可以关闭窗口了。";
         DialogResult = DialogResult.OK;
         Close();

@@ -97,6 +97,22 @@ internal static class CredentialStore
         return ReadPart(target);
     }
 
+    /// <summary>ADR-002 存量迁移：历史版本曾持久化 cookie 串 / "ok:workspaceId" 等内容，
+    /// 现仅保留 "ok" 标记。值非 "ok" 时删除旧内容（含遗留 #n 分段）并重写标记，
+    /// 覆盖从不重新登录的用户；重新登录路径由 Save 的分段清理兜底。</summary>
+    public static void MigrateToMarker(string target)
+    {
+        var value = Read(target);
+        if (value is null || value == "ok")
+        {
+            return;
+        }
+
+        Delete(target);
+        Save(target, "ok");
+        Logger.Log($"CREDENTIAL migrated {target}: legacy content -> marker");
+    }
+
     public static void Delete(string target)
     {
         for (var i = 0; i < MaxParts; i++)

@@ -31,6 +31,9 @@ internal sealed class TrayApp : ApplicationContext
     public TrayApp()
     {
         Autostart.CleanupLegacy();
+        // ADR-002：启动时一次性清理凭据管理器中的历史明文内容（cookie 串 / workspaceId）
+        CredentialStore.MigrateToMarker(CredentialTargets.ChatGptCookies);
+        CredentialStore.MigrateToMarker(CredentialTargets.ZenJwt);
         if (!Autostart.IsEnabled())
         {
             Autostart.Set(true);
