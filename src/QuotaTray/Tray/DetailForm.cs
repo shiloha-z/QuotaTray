@@ -33,6 +33,8 @@ internal sealed class DetailForm : Form
         Text = "立即刷新",
         Width = 100,
         Height = 32,
+        AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowOnly, // 高 DPI 下文字变宽时自动增大，避免按钮文字被裁剪
         Font = new Font("Microsoft YaHei UI", 9.5f),
     };
     private readonly Button _closeButton = new()
@@ -40,9 +42,12 @@ internal sealed class DetailForm : Form
         Text = "关闭",
         Width = 80,
         Height = 32,
+        AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowOnly,
         Font = new Font("Microsoft YaHei UI", 9.5f),
     };
 
+    private readonly TableLayoutPanel _table;
     private readonly System.Windows.Forms.Timer _countdownTimer;
     private UsageSnapshot _snapshot = new();
     private Settings _settings = new();
@@ -59,7 +64,7 @@ internal sealed class DetailForm : Form
         BackColor = Color.White;
         Font = DataFont;
 
-        var table = new TableLayoutPanel
+        _table = new TableLayoutPanel
         {
             Location = new Point(20, 18),
             Size = new Size(420, 280),
@@ -67,23 +72,23 @@ internal sealed class DetailForm : Form
             RowCount = 9,
             BackColor = Color.White,
         };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        for (int i = 0; i < 9; i++) table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        table.RowStyles[2] = new RowStyle(SizeType.Absolute, 8);
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        for (int i = 0; i < 9; i++) _table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _table.RowStyles[2] = new RowStyle(SizeType.Absolute, 8);
 
         var chatTitle = MakeTitle("ChatGPT Plus");
-        table.Controls.Add(chatTitle, 0, 0);
-        table.SetColumnSpan(chatTitle, 3);
+        _table.Controls.Add(chatTitle, 0, 0);
+        _table.SetColumnSpan(chatTitle, 3);
 
-        table.Controls.Add(_chatLabel, 0, 1);
-        table.Controls.Add(_chatValue, 1, 1);
-        table.Controls.Add(_chatReset, 2, 1);
+        _table.Controls.Add(_chatLabel, 0, 1);
+        _table.Controls.Add(_chatValue, 1, 1);
+        _table.Controls.Add(_chatReset, 2, 1);
 
         var goTitle = MakeTitle("opencode Go");
-        table.Controls.Add(goTitle, 0, 3);
-        table.SetColumnSpan(goTitle, 3);
+        _table.Controls.Add(goTitle, 0, 3);
+        _table.SetColumnSpan(goTitle, 3);
 
         string[] goNames = { "5h 滚动", "每周", "每月" };
         for (int i = 0; i < 3; i++)
@@ -92,12 +97,11 @@ internal sealed class DetailForm : Form
             _goLabels[i, 0].Text = GoNames[i];
             _goLabels[i, 1] = MakeData(TextLabel);
             _goLabels[i, 2] = MakeData(TextReset);
-            table.Controls.Add(_goLabels[i, 0], 0, 4 + i);
-            table.Controls.Add(_goLabels[i, 1], 1, 4 + i);
-            table.Controls.Add(_goLabels[i, 2], 2, 4 + i);
+            _table.Controls.Add(_goLabels[i, 0], 0, 4 + i);
+            _table.Controls.Add(_goLabels[i, 1], 1, 4 + i);
+            _table.Controls.Add(_goLabels[i, 2], 2, 4 + i);
         }
 
-        _refreshButton.Location = new Point(240, 310);
         _refreshButton.Click += async (_, _) =>
         {
             _refreshButton.Enabled = false;
@@ -105,15 +109,36 @@ internal sealed class DetailForm : Form
             finally { _refreshButton.Enabled = true; }
         };
 
-        _closeButton.Location = new Point(355, 310);
         _closeButton.Click += (_, _) => Close();
 
-        _updatedLabel.Location = new Point(20, 318);
-
-        Controls.AddRange(new Control[] { table, _refreshButton, _closeButton, _updatedLabel });
+        Controls.AddRange(new Control[] { _table, _refreshButton, _closeButton, _updatedLabel });
 
         _countdownTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _countdownTimer.Tick += (_, _) => UpdateLabels();
+
+        FitToContent(); // 初始按内容确定窗体尺寸，避免出现裁剪
+    }
+
+    /// <summary>按表格内容自适应尺寸：表格可能比预设宽度更宽（高 DPI 或文字较长时），
+    /// 固定大小会导致右侧文字被裁剪，故按 PreferredSize 重新摆放并调整窗体。</summary>
+    private void FitToContent()
+    {
+        var pref = _table.PreferredSize; // 触发表格按当前文本重新计算
+        _table.Size = pref;
+        _table.PerformLayout();
+
+        // 按钮按内容取尺寸（高 DPI 下文字变宽/变高时同步放大，初始尺寸为下限）
+        var btnH = Math.Max(32, Math.Max(_refreshButton.PreferredSize.Height, _closeButton.PreferredSize.Height));
+        _refreshButton.Size = new Size(Math.Max(100, _refreshButton.PreferredSize.Width), btnH);
+        _closeButton.Size = new Size(Math.Max(80, _closeButton.PreferredSize.Width), btnH);
+
+        var y = _table.Bottom + 14; // 按钮行
+        var w = Math.Max(460, _table.Right + 20);
+        _closeButton.Location = new Point(w - 20 - _closeButton.Width, y);
+        _refreshButton.Location = new Point(_closeButton.Left - 10 - _refreshButton.Width, y);
+        _updatedLabel.Location = new Point(20, y + 8);
+
+        ClientSize = new Size(w, Math.Max(360, y + btnH + 18));
     }
 
     private static Label MakeTitle(string text) => new()
@@ -180,6 +205,8 @@ internal sealed class DetailForm : Form
                 _goLabels[i, 2].Text = "";
             }
         }
+
+        FitToContent(); // 文本可能变化，重新按内容布局
     }
 
     private void SetGoRow(int row, double usagePercent, long? resetSec)
